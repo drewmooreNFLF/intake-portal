@@ -36,7 +36,7 @@ const FORM_SECTIONS = [
       { name: 'case_type', label: 'Case Type', type: 'select', options: ['', 'Auto', 'Slip & Fall', 'Other'] },
       { name: 'desired_funds', label: 'Desired Funds ($)', type: 'number' },
       { name: 'state', label: 'State', type: 'text' },
-      { name: 'full_case_style', label: 'Full Case Style', type: 'textarea' },
+      { name: 'full_case_style', label: 'What Happened:', type: 'textarea' },
       { name: 'status_of_case', label: 'Status of Case', type: 'text' },
       { name: 'estimated_time_to_settlement', label: 'Estimated Time to Settlement', type: 'text' },
       { name: 'estimated_case_value', label: 'Estimated Case Value ($)', type: 'number' },
@@ -92,6 +92,7 @@ const FORM_SECTIONS = [
       { name: 'child_support', label: 'Child Support?', type: 'select', options: YES_NO },
       { name: 'bankruptcy', label: 'Bankruptcy?', type: 'select', options: YES_NO },
       { name: 'previous_accidents', label: 'Previous Accidents?', type: 'select', options: YES_NO },
+      { name: 'case_index_number', label: 'Case Index Number', type: 'text' },
       {
         name: 'other_liens_description',
         label: 'Are there any other liens, assignments, or interests in the case? If yes, please describe',
