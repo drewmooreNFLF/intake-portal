@@ -43,9 +43,6 @@ input[type=text],input[type=email],input[type=tel],input[type=date],input[type=n
 }
 textarea { min-height:80px; resize:vertical; }
 input:focus,select:focus,textarea:focus { outline:2px solid var(--primary); outline-offset:1px; }
-.consent-row { display:flex; align-items:flex-start; gap:10px; margin-top:24px; padding:14px; background:#f9fafb; border-radius:8px; border:1px solid var(--border); }
-.consent-row input { margin-top:3px; }
-.consent-row label { font-weight:400; margin:0; font-size:13.5px; }
 button,.btn { display:inline-block; background:var(--primary); color:#fff; border:none; padding:10px 20px; border-radius:7px; font-size:14px; font-weight:500; cursor:pointer; text-decoration:none; }
 button:hover,.btn:hover { background:var(--primary-dark); }
 button.secondary,.btn.secondary { background:#fff; color:var(--text); border:1px solid var(--border); }
@@ -205,7 +202,7 @@ function fileFieldHtml(f) {
   </div>`;
 }
 
-function formPage({ sections, fileFields, consentField, values, error, currentUser }) {
+function formPage({ sections, fileFields, values, error, currentUser }) {
   const sectionsHtml = sections
     .map(
       (s) => `
@@ -232,15 +229,12 @@ function formPage({ sections, fileFields, consentField, values, error, currentUs
     <div class="wrap">
       <div class="card">
         <h1>Funding Application</h1>
+        <p class="subtitle" style="margin-bottom:4px;">All information submitted is considered confidential and will not be shared.</p>
         <p class="subtitle">Please complete all required fields marked with <span style="color:#d1435b">*</span>.</p>
         ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
         <form method="POST" action="/form" enctype="multipart/form-data">
           ${sectionsHtml}
           ${fileSectionHtml}
-          <div class="consent-row">
-            <input type="checkbox" id="consent" name="consent" value="yes" ${values.consent ? 'checked' : ''} />
-            <label for="consent">${escapeHtml(consentField.label)}</label>
-          </div>
           <div class="actions-row">
             <button type="submit">Submit Application</button>
           </div>

@@ -10,7 +10,7 @@ const multer = require('multer');
 const { stringify } = require('csv-stringify/sync');
 
 const { db, seededCredentials } = require('./db');
-const { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS, CONSENT_FIELD } = require('./fields');
+const { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS } = require('./fields');
 const T = require('./templates');
 
 const app = express();
@@ -159,7 +159,6 @@ app.get('/form', requireAuth, (req, res) => {
     T.formPage({
       sections: FORM_SECTIONS,
       fileFields: FILE_FIELDS,
-      consentField: CONSENT_FIELD,
       values: {},
       error: null,
       currentUser: req.session.user,
@@ -176,22 +175,8 @@ app.post('/form', requireAuth, (req, res) => {
         T.formPage({
           sections: FORM_SECTIONS,
           fileFields: FILE_FIELDS,
-          consentField: CONSENT_FIELD,
           values: req.body || {},
           error: message,
-          currentUser: req.session.user,
-        })
-      );
-    }
-
-    if (!req.body.consent) {
-      return res.send(
-        T.formPage({
-          sections: FORM_SECTIONS,
-          fileFields: FILE_FIELDS,
-          consentField: CONSENT_FIELD,
-          values: req.body,
-          error: 'Please check the certification box before submitting.',
           currentUser: req.session.user,
         })
       );

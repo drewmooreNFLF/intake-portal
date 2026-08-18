@@ -110,9 +110,4 @@ const FILE_FIELDS = [
   { name: 'medical_records', label: 'Overview of Injuries & Medical Treatment Records' },
 ];
 
-const CONSENT_FIELD = {
-  name: 'consent',
-  label: 'I certify that the information provided above is true and accurate to the best of my knowledge.',
-};
-
-module.exports = { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS, CONSENT_FIELD };
+module.exports = { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS };
