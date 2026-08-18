@@ -1,8 +1,9 @@
-# Intake Portal
+# New Future Legal Funding — Funding Application Portal
 
-A password-protected web app with a 30-field applicant intake form, multi-user
-login, an admin panel for managing user accounts, submission storage with CSV
-export, and optional email notifications on each submission.
+A password-protected web app for New Future Legal Funding's funding
+application, with multi-user login, an admin panel for managing user
+accounts, submission storage with CSV export, supporting-document uploads,
+and optional email notifications on each submission.
 
 ## Features
 
@@ -10,10 +11,14 @@ export, and optional email notifications on each submission.
 - Admin panel to add users, reset passwords, and delete accounts. Each new
   account gets a temporary password shown once, and the user must set their
   own password on first login.
-- A 30-field intake form covering personal info, contact info, address,
-  emergency contact, background, and application details.
+- The funding application form, matching the "NFLFA Funding Application"
+  paper form: client/attorney/paralegal info, case overview, liability &
+  settlement, insurance info, medical & financial, funding history, and
+  other disclosures — plus uploads for the Police Report, Copy of Insurance
+  Coverage, and medical treatment records (20MB max per file).
 - All submissions are saved and browsable/searchable in the admin panel, with
-  a one-click "Export All to CSV" button.
+  a one-click "Export All to CSV" button and per-file download links on each
+  submission's detail page.
 - Optional SMTP settings (Admin → Email Settings) to email a notification for
   every new submission. Leave blank to skip email — submissions are always
   saved regardless.
@@ -37,12 +42,14 @@ Node (Render, Railway, Fly.io, a VPS, etc.).
 - Build command: `npm install`
 - Start command: `npm start`
 - Set the `SESSION_SECRET` environment variable to a long random string.
-- **Persistent storage matters.** This app stores everything (user accounts,
-  submissions, sessions) in a local SQLite database. Many free hosting tiers
-  wipe local disk on every deploy/restart. If your host offers a persistent
-  disk, mount it and set the `DATA_DIR` environment variable to that mount
-  path (e.g. `DATA_DIR=/var/data`) so your data survives restarts. Without
-  this, all accounts and submissions will be lost whenever the app restarts.
+- **Persistent storage matters.** This app stores everything — user accounts,
+  submissions, sessions, and uploaded documents (police reports, insurance
+  copies, medical records) — on local disk. Many free hosting tiers wipe
+  local disk on every deploy/restart. If your host offers a persistent disk,
+  mount it and set the `DATA_DIR` environment variable to that mount path
+  (e.g. `DATA_DIR=/var/data`) so your data survives restarts. Without this,
+  all accounts, submissions, and uploaded files will be lost whenever the
+  app restarts.
 
 ## Customizing the form fields
 

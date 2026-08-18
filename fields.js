@@ -1,108 +1,118 @@
-// Single source of truth for the intake form's fields.
-// Used to render the form, validate submissions, and build CSV export headers.
+// Single source of truth for the funding application form's fields.
+// Matches "New Future Legal Funding" Funding Application (2026) PDF.
+
+const YES_NO = ['', 'Yes', 'No'];
 
 const FORM_SECTIONS = [
   {
-    title: 'Personal Information',
+    title: 'Client Information',
     fields: [
-      { name: 'first_name', label: 'First Name', type: 'text', required: true },
-      { name: 'last_name', label: 'Last Name', type: 'text', required: true },
-      { name: 'date_of_birth', label: 'Date of Birth', type: 'date' },
+      { name: 'client_name', label: 'Client Name', type: 'text', required: true },
+      { name: 'client_phone', label: 'Client Phone', type: 'tel', required: true },
+      { name: 'client_dob', label: 'Client Date of Birth', type: 'date' },
+      { name: 'client_email', label: 'Client Email', type: 'email' },
+    ],
+  },
+  {
+    title: 'Attorney Information',
+    fields: [
+      { name: 'attorney_name', label: 'Attorney Name', type: 'text' },
+      { name: 'attorney_phone', label: 'Attorney Phone', type: 'tel' },
+      { name: 'attorney_email', label: 'Attorney Email', type: 'email' },
+    ],
+  },
+  {
+    title: 'Paralegal Information',
+    fields: [
+      { name: 'paralegal_name', label: 'Paralegal Name', type: 'text' },
+      { name: 'paralegal_phone', label: 'Paralegal Phone', type: 'tel' },
+      { name: 'paralegal_email', label: 'Paralegal Email', type: 'email' },
+    ],
+  },
+  {
+    title: 'Case Overview',
+    fields: [
+      { name: 'date_of_event', label: 'Date of Event', type: 'date' },
+      { name: 'case_type', label: 'Case Type', type: 'select', options: ['', 'Auto', 'Slip & Fall', 'Other'] },
+      { name: 'desired_funds', label: 'Desired Funds ($)', type: 'number' },
+      { name: 'state', label: 'State', type: 'text' },
+      { name: 'full_case_style', label: 'Full Case Style', type: 'textarea' },
+      { name: 'status_of_case', label: 'Status of Case', type: 'text' },
+      { name: 'estimated_time_to_settlement', label: 'Estimated Time to Settlement', type: 'text' },
+      { name: 'estimated_case_value', label: 'Estimated Case Value ($)', type: 'number' },
       {
-        name: 'gender',
-        label: 'Gender',
+        name: 'likelihood_of_settlement',
+        label: 'Likelihood of Settlement',
         type: 'select',
-        options: ['', 'Female', 'Male', 'Non-binary', 'Prefer not to say'],
-      },
-      {
-        name: 'marital_status',
-        label: 'Marital Status',
-        type: 'select',
-        options: ['', 'Single', 'Married', 'Divorced', 'Widowed', 'Other'],
+        options: ['', 'Poor', 'Fair', 'Good'],
       },
     ],
   },
   {
-    title: 'Contact Information',
+    title: 'Liability & Settlement',
     fields: [
-      { name: 'email', label: 'Email Address', type: 'email', required: true },
-      { name: 'phone', label: 'Phone Number', type: 'tel', required: true },
-      { name: 'alt_phone', label: 'Alternate Phone', type: 'tel' },
+      { name: 'liability_established', label: 'Liability Established?', type: 'select', options: YES_NO },
+      { name: 'suit_filed', label: 'Suit Filed?', type: 'select', options: YES_NO },
+      { name: 'demand_sent', label: 'Demand Sent?', type: 'select', options: YES_NO },
+      { name: 'settlement_offer', label: 'Settlement Offer?', type: 'select', options: YES_NO },
+      { name: 'offer_amount', label: 'Offer Amount ($)', type: 'number' },
+    ],
+  },
+  {
+    title: 'Insurance Information',
+    fields: [
+      { name: 'defendant_insurance_company', label: "Defendant's Insurance Company", type: 'text' },
+      { name: 'policy_limits', label: 'Policy Limits ($)', type: 'number' },
+      { name: 'claim_number', label: 'Claim Number', type: 'text' },
+      { name: 'umuim_name', label: 'UM/UIM Name', type: 'text' },
+      { name: 'umuim_policy_limits', label: 'UM/UIM Policy Limits ($)', type: 'number' },
+      { name: 'umuim_claim_number', label: 'UM/UIM Claim Number', type: 'text' },
+    ],
+  },
+  {
+    title: 'Medical & Financial',
+    fields: [
+      { name: 'estimated_medical_expenses', label: 'Estimated Medical Expenses to Date ($)', type: 'number' },
+      { name: 'medical_liens', label: 'Medical Liens ($)', type: 'number' },
+      { name: 'still_treating', label: 'Is Client Still Treating?', type: 'select', options: YES_NO },
+      { name: 'lost_wages', label: 'Lost Wages ($)', type: 'number' },
+    ],
+  },
+  {
+    title: 'Funding History',
+    fields: [
+      { name: 'previous_funding', label: 'Has Client Received Previous Funding on This Case?', type: 'select', options: YES_NO },
+      { name: 'previous_funding_amount', label: 'If Yes, How Much ($)', type: 'number' },
+      { name: 'previous_funding_company', label: 'If Yes, From Which Company?', type: 'text' },
+    ],
+  },
+  {
+    title: 'Other Disclosures',
+    fields: [
+      { name: 'child_support', label: 'Child Support?', type: 'select', options: YES_NO },
+      { name: 'bankruptcy', label: 'Bankruptcy?', type: 'select', options: YES_NO },
+      { name: 'previous_accidents', label: 'Previous Accidents?', type: 'select', options: YES_NO },
       {
-        name: 'preferred_contact_method',
-        label: 'Preferred Contact Method',
-        type: 'select',
-        options: ['', 'Email', 'Phone', 'Text'],
+        name: 'other_liens_description',
+        label: 'Are there any other liens, assignments, or interests in the case? If yes, please describe',
+        type: 'textarea',
       },
-    ],
-  },
-  {
-    title: 'Address',
-    fields: [
-      { name: 'street_address', label: 'Street Address', type: 'text' },
-      { name: 'address_line2', label: 'Address Line 2', type: 'text' },
-      { name: 'city', label: 'City', type: 'text' },
-      { name: 'state', label: 'State / Province', type: 'text' },
-      { name: 'zip', label: 'ZIP / Postal Code', type: 'text' },
-      { name: 'country', label: 'Country', type: 'text' },
-    ],
-  },
-  {
-    title: 'Emergency Contact',
-    fields: [
-      { name: 'emergency_contact_name', label: 'Emergency Contact Name', type: 'text' },
-      { name: 'emergency_contact_phone', label: 'Emergency Contact Phone', type: 'tel' },
-      { name: 'emergency_contact_relationship', label: 'Relationship', type: 'text' },
-    ],
-  },
-  {
-    title: 'Background',
-    fields: [
-      { name: 'occupation', label: 'Occupation / Job Title', type: 'text' },
-      { name: 'employer', label: 'Current Employer', type: 'text' },
-      { name: 'employment_start_date', label: 'Employment Start Date', type: 'date' },
-      { name: 'annual_income', label: 'Annual Income', type: 'number' },
-      {
-        name: 'education_level',
-        label: 'Highest Education Level',
-        type: 'select',
-        options: [
-          '',
-          'High School',
-          'Some College',
-          "Associate's Degree",
-          "Bachelor's Degree",
-          "Master's Degree",
-          'Doctorate',
-          'Other',
-        ],
-      },
-      { name: 'school_name', label: 'School / Institution Name', type: 'text' },
-      { name: 'graduation_year', label: 'Graduation Year', type: 'number' },
-    ],
-  },
-  {
-    title: 'Application Details',
-    fields: [
-      { name: 'reason_for_application', label: 'Reason for Application', type: 'textarea' },
-      { name: 'previous_experience', label: 'Previous Experience / Background', type: 'textarea' },
-      { name: 'availability_date', label: 'Availability / Start Date', type: 'date' },
-      {
-        name: 'how_heard',
-        label: 'How Did You Hear About Us?',
-        type: 'select',
-        options: ['', 'Referral', 'Online Search', 'Social Media', 'Advertisement', 'Other'],
-      },
-      { name: 'additional_comments', label: 'Additional Comments', type: 'textarea' },
     ],
   },
 ];
 
 const ALL_FIELDS = FORM_SECTIONS.flatMap((s) => s.fields);
 
+// Supporting documents — uploaded as files, stored/tracked separately from the text fields above.
+const FILE_FIELDS = [
+  { name: 'police_report', label: 'Police Report' },
+  { name: 'insurance_coverage', label: 'Copy of Insurance Coverage' },
+  { name: 'medical_records', label: 'Overview of Injuries & Medical Treatment Records' },
+];
+
 const CONSENT_FIELD = {
   name: 'consent',
   label: 'I certify that the information provided above is true and accurate to the best of my knowledge.',
 };
 
-module.exports = { FORM_SECTIONS, ALL_FIELDS, CONSENT_FIELD };
+module.exports = { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS, CONSENT_FIELD };

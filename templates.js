@@ -79,7 +79,7 @@ form.inline { display:inline; }
 @media (max-width:640px) { .field-grid{grid-template-columns:1fr;} .dash-grid{grid-template-columns:1fr;} .wrap{margin:20px auto;} }
 `;
 
-function layout({ title = 'Intake Portal', body = '', currentUser = null }) {
+function layout({ title = 'New Future Legal Funding', body = '', currentUser = null }) {
   const nav = currentUser
     ? `<span class="user-pill">${escapeHtml(currentUser.display_name || currentUser.username)} &middot; ${currentUser.role}</span>
        <a href="/form">Form</a>
@@ -98,7 +98,7 @@ function layout({ title = 'Intake Portal', body = '', currentUser = null }) {
 <style>${STYLE}</style>
 </head>
 <body>
-${currentUser ? `<div class="topbar"><div class="brand">Intake Portal</div><nav>${nav}</nav></div>` : ''}
+${currentUser ? `<div class="topbar"><div class="brand">New Future Legal Funding</div><nav>${nav}</nav></div>` : ''}
 ${body}
 </body>
 </html>`;
@@ -106,11 +106,11 @@ ${body}
 
 function loginPage({ error }) {
   return layout({
-    title: 'Log In · Intake Portal',
+    title: 'Log In · New Future Legal Funding',
     body: `
     <div class="wrap">
       <div class="card centered-card">
-        <h1>Intake Portal</h1>
+        <h1>New Future Legal Funding</h1>
         <p class="subtitle">Sign in with your assigned username and password.</p>
         ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
         <form method="POST" action="/login">
@@ -198,7 +198,14 @@ function fieldHtml(f, values) {
   </div>`;
 }
 
-function formPage({ sections, consentField, values, error, currentUser }) {
+function fileFieldHtml(f) {
+  return `<div class="field">
+    <label for="${f.name}">${escapeHtml(f.label)}</label>
+    <input type="file" id="${f.name}" name="${f.name}" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" />
+  </div>`;
+}
+
+function formPage({ sections, fileFields, consentField, values, error, currentUser }) {
   const sectionsHtml = sections
     .map(
       (s) => `
@@ -209,17 +216,27 @@ function formPage({ sections, consentField, values, error, currentUser }) {
     )
     .join('\n');
 
+  const fileSectionHtml = fileFields
+    ? `
+      <div class="section-title">Supporting Documents</div>
+      <p class="small" style="margin-top:-8px;margin-bottom:14px;">Optional here, but please attach as soon as they're available (20MB max per file).</p>
+      <div class="field-grid">
+        ${fileFields.map((f) => fileFieldHtml(f)).join('\n')}
+      </div>`
+    : '';
+
   return layout({
-    title: 'Intake Form',
+    title: 'Funding Application',
     currentUser,
     body: `
     <div class="wrap">
       <div class="card">
-        <h1>Applicant Intake Form</h1>
+        <h1>Funding Application</h1>
         <p class="subtitle">Please complete all required fields marked with <span style="color:#d1435b">*</span>.</p>
         ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
-        <form method="POST" action="/form">
+        <form method="POST" action="/form" enctype="multipart/form-data">
           ${sectionsHtml}
+          ${fileSectionHtml}
           <div class="consent-row">
             <input type="checkbox" id="consent" name="consent" value="yes" ${values.consent ? 'checked' : ''} />
             <label for="consent">${escapeHtml(consentField.label)}</label>
@@ -346,7 +363,7 @@ function adminSubmissionsPage({ rows, q, currentUser }) {
   });
 }
 
-function adminSubmissionDetailPage({ row, data, sections, currentUser }) {
+function adminSubmissionDetailPage({ row, data, files, sections, fileFields, currentUser }) {
   const sectionsHtml = sections
     .map(
       (s) => `
@@ -357,6 +374,23 @@ function adminSubmissionDetailPage({ row, data, sections, currentUser }) {
     )
     .join('\n');
 
+  const filesHtml = fileFields
+    ? `
+      <div class="section-title">Supporting Documents</div>
+      <dl class="detail-grid" style="margin-bottom:16px;">
+        ${fileFields
+          .map((f) => {
+            const meta = files && files[f.name];
+            return `<dt>${escapeHtml(f.label)}</dt><dd>${
+              meta
+                ? `<a class="btn secondary" style="padding:4px 10px;font-size:12.5px;" href="/admin/submissions/${row.id}/download/${f.name}">Download ${escapeHtml(meta.originalName)}</a>`
+                : '&mdash; not attached'
+            }</dd>`;
+          })
+          .join('\n')}
+      </dl>`
+    : '';
+
   return layout({
     title: 'Submission Detail',
     currentUser,
@@ -366,6 +400,7 @@ function adminSubmissionDetailPage({ row, data, sections, currentUser }) {
         <h1>${escapeHtml(row.applicant_name || 'Submission #' + row.id)}</h1>
         <p class="subtitle">Submitted by ${escapeHtml(row.submitted_by)} on ${escapeHtml(row.submitted_at)}</p>
         ${sectionsHtml}
+        ${filesHtml}
         <div class="actions-row"><a class="btn secondary" href="/admin/submissions">Back to Submissions</a></div>
       </div>
     </div>`,

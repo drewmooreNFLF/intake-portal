@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   applicant_name TEXT,
   applicant_email TEXT,
   data TEXT NOT NULL,
+  files TEXT NOT NULL DEFAULT '{}',
   submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -37,6 +38,12 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT
 );
 `);
+
+// Lightweight migration: add the `files` column if this DB predates it.
+const submissionCols = db.prepare("PRAGMA table_info(submissions)").all().map((c) => c.name);
+if (!submissionCols.includes('files')) {
+  db.exec("ALTER TABLE submissions ADD COLUMN files TEXT NOT NULL DEFAULT '{}'");
+}
 
 // Seed a default admin account on first run only
 const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;

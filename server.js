@@ -1,20 +1,37 @@
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const multer = require('multer');
 const { stringify } = require('csv-stringify/sync');
 
 const { db, seededCredentials } = require('./db');
-const { FORM_SECTIONS, ALL_FIELDS, CONSENT_FIELD } = require('./fields');
+const { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS, CONSENT_FIELD } = require('./fields');
 const T = require('./templates');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-secret-in-production-please';
-const SESSION_DIR = process.env.DATA_DIR || path.join(__dirname, 'db');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'db');
+const SESSION_DIR = DATA_DIR;
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${unique}${path.extname(file.originalname)}`);
+    },
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB per file
+});
+const uploadFormFiles = upload.fields(FILE_FIELDS.map((f) => ({ name: f.name, maxCount: 1 })));
 
 app.use(express.urlencoded({ extended: true }));
 
@@ -141,6 +158,7 @@ app.get('/form', requireAuth, (req, res) => {
   res.send(
     T.formPage({
       sections: FORM_SECTIONS,
+      fileFields: FILE_FIELDS,
       consentField: CONSENT_FIELD,
       values: {},
       error: null,
@@ -150,42 +168,80 @@ app.get('/form', requireAuth, (req, res) => {
 });
 
 app.post('/form', requireAuth, (req, res) => {
-  if (!req.body.consent) {
-    return res.send(
-      T.formPage({
-        sections: FORM_SECTIONS,
-        consentField: CONSENT_FIELD,
-        values: req.body,
-        error: 'Please check the certification box before submitting.',
-        currentUser: req.session.user,
-      })
-    );
-  }
+  uploadFormFiles(req, res, (err) => {
+    if (err) {
+      const message =
+        err.code === 'LIMIT_FILE_SIZE' ? 'One of your files is too large (20MB max per file).' : 'There was a problem uploading your files: ' + err.message;
+      return res.send(
+        T.formPage({
+          sections: FORM_SECTIONS,
+          fileFields: FILE_FIELDS,
+          consentField: CONSENT_FIELD,
+          values: req.body || {},
+          error: message,
+          currentUser: req.session.user,
+        })
+      );
+    }
 
-  const data = {};
-  ALL_FIELDS.forEach((f) => {
-    data[f.name] = (req.body[f.name] || '').toString().trim();
+    if (!req.body.consent) {
+      return res.send(
+        T.formPage({
+          sections: FORM_SECTIONS,
+          fileFields: FILE_FIELDS,
+          consentField: CONSENT_FIELD,
+          values: req.body,
+          error: 'Please check the certification box before submitting.',
+          currentUser: req.session.user,
+        })
+      );
+    }
+
+    const data = {};
+    ALL_FIELDS.forEach((f) => {
+      data[f.name] = (req.body[f.name] || '').toString().trim();
+    });
+
+    const files = {};
+    FILE_FIELDS.forEach((f) => {
+      const uploaded = req.files && req.files[f.name] && req.files[f.name][0];
+      if (uploaded) {
+        files[f.name] = {
+          originalName: uploaded.originalname,
+          storedName: uploaded.filename,
+          mimetype: uploaded.mimetype,
+          size: uploaded.size,
+        };
+      }
+    });
+
+    const applicantName = data.client_name || '';
+
+    const info = db
+      .prepare(
+        `INSERT INTO submissions (user_id, submitted_by, applicant_name, applicant_email, data, files)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        req.session.user.id,
+        req.session.user.username,
+        applicantName,
+        data.client_email || '',
+        JSON.stringify(data),
+        JSON.stringify(files)
+      );
+
+    const submission = {
+      id: info.lastInsertRowid,
+      submitted_by: req.session.user.username,
+      applicant_name: applicantName,
+      submitted_at: new Date().toISOString(),
+      data,
+    };
+    maybeSendNotification(submission);
+
+    res.send(T.successPage({ applicantName, currentUser: req.session.user }));
   });
-
-  const applicantName = [data.first_name, data.last_name].filter(Boolean).join(' ');
-
-  const info = db
-    .prepare(
-      `INSERT INTO submissions (user_id, submitted_by, applicant_name, applicant_email, data)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(req.session.user.id, req.session.user.username, applicantName, data.email || '', JSON.stringify(data));
-
-  const submission = {
-    id: info.lastInsertRowid,
-    submitted_by: req.session.user.username,
-    applicant_name: applicantName,
-    submitted_at: new Date().toISOString(),
-    data,
-  };
-  maybeSendNotification(submission);
-
-  res.send(T.successPage({ applicantName, currentUser: req.session.user }));
 });
 
 // ---------- admin: dashboard ----------
@@ -288,10 +344,23 @@ app.get('/admin/submissions', requireAdmin, (req, res) => {
 
 app.get('/admin/submissions/export.csv', requireAdmin, (req, res) => {
   const rows = db.prepare('SELECT * FROM submissions ORDER BY submitted_at DESC').all();
-  const header = ['id', 'submitted_by', 'submitted_at', ...ALL_FIELDS.map((f) => f.name)];
+  const header = [
+    'id',
+    'submitted_by',
+    'submitted_at',
+    ...ALL_FIELDS.map((f) => f.name),
+    ...FILE_FIELDS.map((f) => f.name + '_filename'),
+  ];
   const records = rows.map((r) => {
     const data = JSON.parse(r.data);
-    return [r.id, r.submitted_by, r.submitted_at, ...ALL_FIELDS.map((f) => data[f.name] || '')];
+    const files = JSON.parse(r.files || '{}');
+    return [
+      r.id,
+      r.submitted_by,
+      r.submitted_at,
+      ...ALL_FIELDS.map((f) => data[f.name] || ''),
+      ...FILE_FIELDS.map((f) => (files[f.name] ? files[f.name].originalName : '')),
+    ];
   });
   const csv = stringify([header, ...records]);
   res.setHeader('Content-Type', 'text/csv');
@@ -303,7 +372,21 @@ app.get('/admin/submissions/:id', requireAdmin, (req, res) => {
   const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).send('Not found');
   const data = JSON.parse(row.data);
-  res.send(T.adminSubmissionDetailPage({ row, data, sections: FORM_SECTIONS, currentUser: req.session.user }));
+  const files = JSON.parse(row.files || '{}');
+  res.send(
+    T.adminSubmissionDetailPage({ row, data, files, sections: FORM_SECTIONS, fileFields: FILE_FIELDS, currentUser: req.session.user })
+  );
+});
+
+app.get('/admin/submissions/:id/download/:field', requireAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).send('Not found');
+  const files = JSON.parse(row.files || '{}');
+  const meta = files[req.params.field];
+  if (!meta || !FILE_FIELDS.some((f) => f.name === req.params.field)) return res.status(404).send('No file for this field');
+  const filePath = path.join(UPLOAD_DIR, meta.storedName);
+  if (!fs.existsSync(filePath)) return res.status(404).send('File no longer exists on the server.');
+  res.download(filePath, meta.originalName);
 });
 
 // ---------- admin: settings (email notifications) ----------
