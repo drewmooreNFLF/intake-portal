@@ -56,6 +56,12 @@ if (!submissionCols.includes('files')) {
   db.exec("ALTER TABLE submissions ADD COLUMN files TEXT NOT NULL DEFAULT '{}'");
 }
 
+// Which form(s) a user may use: 'all', 'application' (funding application only) or 'invoices' (invoice list only).
+const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!userCols.includes('form_access')) {
+  db.exec("ALTER TABLE users ADD COLUMN form_access TEXT NOT NULL DEFAULT 'all'");
+}
+
 // Seed a default admin account on first run only
 const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
 let seededCredentials = null;

@@ -34,6 +34,13 @@ Lists, with per-list detail pages and CSV export (one CSV row per invoice).
 Columns are defined in `INVOICE_COLUMNS` in `fields.js`. If email settings
 are configured, each invoice list also triggers a notification email.
 
+### Form access per user
+
+Each user has a Form Access setting (Admin → Manage Users): Both forms,
+Funding Application only, or Invoice List only. Users only see links to, and
+can only open, the forms they're allowed; changes take effect on their next
+page load. Existing users default to Both forms. Admins always see everything.
+
 ## Running locally
 
 ```

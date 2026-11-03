@@ -91,11 +91,18 @@ td.num, th.num { text-align:right; }
 @media (max-width:640px) { .field-grid{grid-template-columns:1fr;} .dash-grid,.dash-grid.three{grid-template-columns:1fr;} .wrap{margin:20px auto;} }
 `;
 
+function canSee(user, form) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const access = user.form_access || 'all';
+  return access === 'all' || access === form;
+}
+
 function layout({ title = 'New Future Legal Funding', body = '', currentUser = null }) {
   const nav = currentUser
     ? `<span class="user-pill">${escapeHtml(currentUser.display_name || currentUser.username)} &middot; ${currentUser.role}</span>
-       <a href="/form">Form</a>
-       <a href="/invoices">Invoice List</a>
+       ${canSee(currentUser, 'application') ? '<a href="/form">Funding Application</a>' : ''}
+       ${canSee(currentUser, 'invoices') ? '<a href="/invoices">Invoice List</a>' : ''}
        ${currentUser.role === 'admin' ? '<a href="/admin">Admin</a>' : ''}
        <a href="/account/change-password">Change Password</a>
        <form class="inline" method="POST" action="/logout" style="display:inline">
@@ -285,7 +292,13 @@ function adminDashboardPage({ userCount, submissionCount, invoiceListCount, curr
   });
 }
 
-function adminUsersPage({ users, error, generatedPassword, newUsername, currentUser }) {
+function accessSelect(options, selected, attrs = '') {
+  return `<select name="form_access" ${attrs}>${options
+    .map((o) => `<option value="${o.value}" ${o.value === (selected || 'all') ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)
+    .join('')}</select>`;
+}
+
+function adminUsersPage({ users, error, notice, generatedPassword, newUsername, accessOptions, currentUser }) {
   const rows = users
     .map(
       (u) => `
@@ -293,6 +306,14 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
         <td>${escapeHtml(u.username)}</td>
         <td>${escapeHtml(u.display_name || '')}</td>
         <td><span class="pill ${u.role}">${u.role}</span></td>
+        <td>${
+          u.role === 'admin'
+            ? '<span class="small">All forms (admin)</span>'
+            : `<form class="inline" method="POST" action="/admin/users/${u.id}/access" style="display:flex;gap:6px;align-items:center;">
+                 ${accessSelect(accessOptions, u.form_access, 'style="padding:5px 8px;font-size:12.5px;"')}
+                 <button type="submit" class="secondary" style="padding:5px 10px;font-size:12.5px;">Save</button>
+               </form>`
+        }</td>
         <td class="small">${escapeHtml(u.created_at)}</td>
         <td>
           <form class="inline" method="POST" action="/admin/users/${u.id}/reset-password" onsubmit="return confirm('Reset password for ${escapeHtml(u.username)}?');">
@@ -313,8 +334,9 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
     <div class="wrap wide">
       <div class="card">
         <h1>User Accounts</h1>
-        <p class="subtitle">Add a user, then share their temporary password with them securely. They'll be required to set their own password on first login.</p>
+        <p class="subtitle">Add a user, then share their temporary password with them securely. They'll be required to set their own password on first login. Form Access controls which form(s) each user can see; admins always see everything.</p>
         ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
+        ${notice ? `<div class="alert success">${escapeHtml(notice)}</div>` : ''}
         ${
           generatedPassword
             ? `<div class="credential-box">Temporary credentials for <strong>${escapeHtml(newUsername)}</strong>:<br/>
@@ -328,10 +350,11 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
           <div class="field"><label>Role</label>
             <select name="role"><option value="user">User</option><option value="admin">Admin</option></select>
           </div>
+          <div class="field"><label>Form Access</label>${accessSelect(accessOptions, 'all')}</div>
           <div class="field"><button type="submit">Add User</button></div>
         </form>
         <table>
-          <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th></th></tr></thead>
+          <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Form Access</th><th>Created</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>

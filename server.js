@@ -18,6 +18,7 @@ const {
   INVOICE_COLUMNS,
   INVOICE_MAX_ROWS,
   INVOICE_START_ROWS,
+  FORM_ACCESS_OPTIONS,
 } = require('./fields');
 const T = require('./templates');
 
@@ -58,7 +59,43 @@ app.use(
   })
 );
 
+// Keep the session's copy of the user in sync with the database, so changes an
+// admin makes (form access, role, deleting the account) apply right away.
+app.use((req, res, next) => {
+  if (!req.session.user) return next();
+  const row = db.prepare('SELECT id, username, role, display_name, form_access FROM users WHERE id = ?').get(req.session.user.id);
+  if (!row) return req.session.destroy(() => res.redirect('/login'));
+  req.session.user = {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    display_name: row.display_name,
+    form_access: row.form_access || 'all',
+  };
+  next();
+});
+
 // ---------- helpers ----------
+function canUseForm(user, form) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const access = user.form_access || 'all';
+  return access === 'all' || access === form;
+}
+
+function homeFor(user) {
+  if (user.role === 'admin') return '/admin';
+  return canUseForm(user, 'application') ? '/form' : '/invoices';
+}
+
+function requireForm(form) {
+  return (req, res, next) => {
+    if (!req.session.user) return res.redirect('/login');
+    if (!canUseForm(req.session.user, form)) return res.redirect(homeFor(req.session.user));
+    next();
+  };
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
   next();
@@ -159,7 +196,7 @@ async function maybeSendNotification(submission) {
 
 // ---------- auth routes ----------
 app.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/form');
+  if (req.session.user) return res.redirect(homeFor(req.session.user));
   res.send(T.loginPage({ error: null }));
 });
 
@@ -174,16 +211,17 @@ app.post('/login', (req, res) => {
     username: user.username,
     role: user.role,
     display_name: user.display_name,
+    form_access: user.form_access || 'all',
   };
   if (user.must_change_password) return res.redirect('/account/change-password');
-  res.redirect(user.role === 'admin' ? '/admin' : '/form');
+  res.redirect(homeFor(req.session.user));
 });
 
 app.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-app.get('/', (req, res) => res.redirect(req.session.user ? '/form' : '/login'));
+app.get('/', (req, res) => res.redirect(req.session.user ? homeFor(req.session.user) : '/login'));
 
 // ---------- account ----------
 app.get('/account/change-password', requireAuth, (req, res) => {
@@ -204,11 +242,11 @@ app.post('/account/change-password', requireAuth, (req, res) => {
   }
   const hash = bcrypt.hashSync(new_password, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, user.id);
-  res.redirect(user.role === 'admin' ? '/admin' : '/form');
+  res.redirect(homeFor(req.session.user));
 });
 
 // ---------- intake form ----------
-app.get('/form', requireAuth, (req, res) => {
+app.get('/form', requireForm('application'), (req, res) => {
   res.send(
     T.formPage({
       sections: FORM_SECTIONS,
@@ -220,7 +258,7 @@ app.get('/form', requireAuth, (req, res) => {
   );
 });
 
-app.post('/form', requireAuth, (req, res) => {
+app.post('/form', requireForm('application'), (req, res) => {
   uploadFormFiles(req, res, (err) => {
     if (err) {
       const message =
@@ -311,11 +349,11 @@ function renderInvoiceForm(res, { rows = [], notes = '', error = null, user }) {
   );
 }
 
-app.get('/invoices', requireAuth, (req, res) => {
+app.get('/invoices', requireForm('invoices'), (req, res) => {
   renderInvoiceForm(res, { user: req.session.user });
 });
 
-app.post('/invoices', requireAuth, (req, res) => {
+app.post('/invoices', requireForm('invoices'), (req, res) => {
   const body = req.body || {};
   const cols = INVOICE_COLUMNS.map((c) => asArray(body[c.name]));
   const rowCount = Math.max(0, ...cols.map((a) => a.length));
@@ -372,31 +410,50 @@ app.get('/admin', requireAdmin, (req, res) => {
 
 // ---------- admin: users ----------
 function listUsers() {
-  return db.prepare('SELECT id, username, role, display_name, created_at FROM users ORDER BY created_at DESC').all();
+  return db.prepare('SELECT id, username, role, display_name, form_access, created_at FROM users ORDER BY created_at DESC').all();
+}
+
+function cleanAccess(v) {
+  return FORM_ACCESS_OPTIONS.some((o) => o.value === v) ? v : 'all';
+}
+
+function renderUsers(res, req, extra = {}) {
+  res.send(
+    T.adminUsersPage({
+      users: listUsers(),
+      error: null,
+      generatedPassword: null,
+      newUsername: null,
+      notice: null,
+      accessOptions: FORM_ACCESS_OPTIONS,
+      currentUser: req.session.user,
+      ...extra,
+    })
+  );
 }
 
 app.get('/admin/users', requireAdmin, (req, res) => {
-  res.send(T.adminUsersPage({ users: listUsers(), error: null, generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+  renderUsers(res, req);
 });
 
 app.post('/admin/users', requireAdmin, (req, res) => {
-  const { username, display_name, role } = req.body;
+  const { username, display_name, role, form_access } = req.body;
   const uname = (username || '').trim();
   if (!uname) {
-    return res.send(T.adminUsersPage({ users: listUsers(), error: 'Username is required.', generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+    return renderUsers(res, req, { error: 'Username is required.' });
   }
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(uname);
   if (existing) {
-    return res.send(T.adminUsersPage({ users: listUsers(), error: 'That username is already taken.', generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+    return renderUsers(res, req, { error: 'That username is already taken.' });
   }
 
   const tempPassword = Math.random().toString(36).slice(-6) + Math.random().toString(36).slice(-6);
   const hash = bcrypt.hashSync(tempPassword, 10);
   db.prepare(
-    'INSERT INTO users (username, password_hash, role, display_name, must_change_password) VALUES (?, ?, ?, ?, 1)'
-  ).run(uname, hash, role === 'admin' ? 'admin' : 'user', display_name || uname);
+    'INSERT INTO users (username, password_hash, role, display_name, must_change_password, form_access) VALUES (?, ?, ?, ?, 1, ?)'
+  ).run(uname, hash, role === 'admin' ? 'admin' : 'user', display_name || uname, cleanAccess(form_access));
 
-  res.send(T.adminUsersPage({ users: listUsers(), error: null, generatedPassword: tempPassword, newUsername: uname, currentUser: req.session.user }));
+  renderUsers(res, req, { generatedPassword: tempPassword, newUsername: uname });
 });
 
 app.post('/admin/users/:id/reset-password', requireAdmin, (req, res) => {
@@ -404,41 +461,26 @@ app.post('/admin/users/:id/reset-password', requireAdmin, (req, res) => {
   const hash = bcrypt.hashSync(tempPassword, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hash, req.params.id);
   const target = db.prepare('SELECT username FROM users WHERE id = ?').get(req.params.id);
-  res.send(
-    T.adminUsersPage({
-      users: listUsers(),
-      error: null,
-      generatedPassword: tempPassword,
-      newUsername: target ? target.username : null,
-      currentUser: req.session.user,
-    })
-  );
+  renderUsers(res, req, { generatedPassword: tempPassword, newUsername: target ? target.username : null });
+});
+
+app.post('/admin/users/:id/access', requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT username FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return renderUsers(res, req, { error: 'That user no longer exists.' });
+  const access = cleanAccess(req.body.form_access);
+  db.prepare('UPDATE users SET form_access = ? WHERE id = ?').run(access, req.params.id);
+  const label = FORM_ACCESS_OPTIONS.find((o) => o.value === access).label;
+  renderUsers(res, req, { notice: `${target.username} now has access to: ${label}.` });
 });
 
 app.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
   if (Number(req.params.id) === req.session.user.id) {
-    return res.send(
-      T.adminUsersPage({
-        users: listUsers(),
-        error: "You can't delete your own account while logged in.",
-        generatedPassword: null,
-        newUsername: null,
-        currentUser: req.session.user,
-      })
-    );
+    return renderUsers(res, req, { error: "You can't delete your own account while logged in." });
   }
   try {
     db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
   } catch (err) {
-    return res.send(
-      T.adminUsersPage({
-        users: listUsers(),
-        error: 'Could not delete that user: ' + err.message,
-        generatedPassword: null,
-        newUsername: null,
-        currentUser: req.session.user,
-      })
-    );
+    return renderUsers(res, req, { error: 'Could not delete that user: ' + err.message });
   }
   res.redirect('/admin/users');
 });

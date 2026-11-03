@@ -128,6 +128,13 @@ const INVOICE_COLUMNS = [
   { name: 'amount', label: 'Amount', csv: 'Invoice Amount', required: true, numeric: true, width: '120px' },
 ];
 const INVOICE_MAX_ROWS = 100;
+
+// Per-user form access options (admins always have access to everything).
+const FORM_ACCESS_OPTIONS = [
+  { value: 'all', label: 'Both forms' },
+  { value: 'application', label: 'Funding Application only' },
+  { value: 'invoices', label: 'Invoice List only' },
+];
 const INVOICE_START_ROWS = 10;
 
 module.exports = {
@@ -138,4 +145,5 @@ module.exports = {
   INVOICE_COLUMNS,
   INVOICE_MAX_ROWS,
   INVOICE_START_ROWS,
+  FORM_ACCESS_OPTIONS,
 };
