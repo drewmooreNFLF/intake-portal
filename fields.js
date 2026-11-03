@@ -111,4 +111,39 @@ const FILE_FIELDS = [
   { name: 'medical_records', label: 'Overview of Injuries & Medical Treatment Records' },
 ];
 
-module.exports = { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS };
+// Invoice List form — one row per invoice, matching the "Invoice List" spreadsheet.
+const INVOICE_GROUPS = [
+  { title: 'Insured Name', fields: ['last_name', 'first_name'] },
+  { title: 'Property Address', fields: ['street', 'city', 'state', 'zip'] },
+  { title: 'Invoice', fields: ['invoice_number', 'amount'] },
+];
+const INVOICE_COLUMNS = [
+  { name: 'last_name', label: 'Last', csv: 'Insured Last', required: true },
+  { name: 'first_name', label: 'First', csv: 'Insured First' },
+  { name: 'street', label: 'Street', csv: 'Street' },
+  { name: 'city', label: 'City', csv: 'City' },
+  { name: 'state', label: 'State', csv: 'State', width: '64px', maxlength: 2 },
+  { name: 'zip', label: 'Zip', csv: 'Zip', width: '90px', maxlength: 10 },
+  { name: 'invoice_number', label: 'Number', csv: 'Invoice Number', required: true },
+  { name: 'amount', label: 'Amount', csv: 'Invoice Amount', required: true, numeric: true, width: '120px' },
+];
+const INVOICE_MAX_ROWS = 100;
+
+// Per-user form access options (admins always have access to everything).
+const FORM_ACCESS_OPTIONS = [
+  { value: 'all', label: 'Both forms' },
+  { value: 'application', label: 'Funding Application only' },
+  { value: 'invoices', label: 'Invoice List only' },
+];
+const INVOICE_START_ROWS = 10;
+
+module.exports = {
+  FORM_SECTIONS,
+  ALL_FIELDS,
+  FILE_FIELDS,
+  INVOICE_GROUPS,
+  INVOICE_COLUMNS,
+  INVOICE_MAX_ROWS,
+  INVOICE_START_ROWS,
+  FORM_ACCESS_OPTIONS,
+};

@@ -10,7 +10,16 @@ const multer = require('multer');
 const { stringify } = require('csv-stringify/sync');
 
 const { db, seededCredentials } = require('./db');
-const { FORM_SECTIONS, ALL_FIELDS, FILE_FIELDS } = require('./fields');
+const {
+  FORM_SECTIONS,
+  ALL_FIELDS,
+  FILE_FIELDS,
+  INVOICE_GROUPS,
+  INVOICE_COLUMNS,
+  INVOICE_MAX_ROWS,
+  INVOICE_START_ROWS,
+  FORM_ACCESS_OPTIONS,
+} = require('./fields');
 const T = require('./templates');
 
 const app = express();
@@ -33,7 +42,7 @@ const upload = multer({
 });
 const uploadFormFiles = upload.fields(FILE_FIELDS.map((f) => ({ name: f.name, maxCount: 1 })));
 
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, parameterLimit: 5000 }));
 
 app.use(
   session({
@@ -50,7 +59,43 @@ app.use(
   })
 );
 
+// Keep the session's copy of the user in sync with the database, so changes an
+// admin makes (form access, role, deleting the account) apply right away.
+app.use((req, res, next) => {
+  if (!req.session.user) return next();
+  const row = db.prepare('SELECT id, username, role, display_name, form_access FROM users WHERE id = ?').get(req.session.user.id);
+  if (!row) return req.session.destroy(() => res.redirect('/login'));
+  req.session.user = {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    display_name: row.display_name,
+    form_access: row.form_access || 'all',
+  };
+  next();
+});
+
 // ---------- helpers ----------
+function canUseForm(user, form) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const access = user.form_access || 'all';
+  return access === 'all' || access === form;
+}
+
+function homeFor(user) {
+  if (user.role === 'admin') return '/admin';
+  return canUseForm(user, 'application') ? '/form' : '/invoices';
+}
+
+function requireForm(form) {
+  return (req, res, next) => {
+    if (!req.session.user) return res.redirect('/login');
+    if (!canUseForm(req.session.user, form)) return res.redirect(homeFor(req.session.user));
+    next();
+  };
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
   next();
@@ -71,6 +116,52 @@ function setSetting(key, value) {
   db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
   ).run(key, value);
+}
+
+function getMailer() {
+  const host = getSetting('smtp_host');
+  const port = getSetting('smtp_port');
+  const smtpUser = getSetting('smtp_user');
+  const smtpPass = getSetting('smtp_pass');
+  const fromAddr = getSetting('smtp_from') || smtpUser;
+  const toAddr = getSetting('notify_email');
+  if (!host || !port || !toAddr) return null;
+  const transporter = nodemailer.createTransport({
+    host,
+    port: Number(port),
+    secure: Number(port) === 465,
+    auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
+  });
+  return { transporter, fromAddr, toAddr };
+}
+
+async function maybeSendInvoiceNotification(list) {
+  const mailer = getMailer();
+  if (!mailer) return;
+  try {
+    const lines = list.rows
+      .map(
+        (r, i) =>
+          `${i + 1}. ${r.last_name}${r.first_name ? ', ' + r.first_name : ''} | ` +
+          `${[r.street, r.city, r.state, r.zip].filter(Boolean).join(', ')} | ` +
+          `Invoice ${r.invoice_number} | ${formatMoney(r.amount)}`
+      )
+      .join('\n');
+    await mailer.transporter.sendMail({
+      from: mailer.fromAddr,
+      to: mailer.toAddr,
+      subject: `New invoice list from ${list.submitted_by}: ${list.rows.length} invoice(s), ${formatMoney(list.total)}`,
+      text: `Submitted by: ${list.submitted_by}\nSubmitted at: ${list.submitted_at}\n` +
+        `Invoices: ${list.rows.length}\nTotal: ${formatMoney(list.total)}\n\n${lines}` +
+        (list.notes ? `\n\nNotes:\n${list.notes}` : ''),
+    });
+  } catch (err) {
+    console.error('Invoice email notification failed:', err.message);
+  }
+}
+
+function formatMoney(n) {
+  return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
 async function maybeSendNotification(submission) {
@@ -105,7 +196,7 @@ async function maybeSendNotification(submission) {
 
 // ---------- auth routes ----------
 app.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/form');
+  if (req.session.user) return res.redirect(homeFor(req.session.user));
   res.send(T.loginPage({ error: null }));
 });
 
@@ -120,16 +211,17 @@ app.post('/login', (req, res) => {
     username: user.username,
     role: user.role,
     display_name: user.display_name,
+    form_access: user.form_access || 'all',
   };
   if (user.must_change_password) return res.redirect('/account/change-password');
-  res.redirect(user.role === 'admin' ? '/admin' : '/form');
+  res.redirect(homeFor(req.session.user));
 });
 
 app.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-app.get('/', (req, res) => res.redirect(req.session.user ? '/form' : '/login'));
+app.get('/', (req, res) => res.redirect(req.session.user ? homeFor(req.session.user) : '/login'));
 
 // ---------- account ----------
 app.get('/account/change-password', requireAuth, (req, res) => {
@@ -150,11 +242,11 @@ app.post('/account/change-password', requireAuth, (req, res) => {
   }
   const hash = bcrypt.hashSync(new_password, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, user.id);
-  res.redirect(user.role === 'admin' ? '/admin' : '/form');
+  res.redirect(homeFor(req.session.user));
 });
 
 // ---------- intake form ----------
-app.get('/form', requireAuth, (req, res) => {
+app.get('/form', requireForm('application'), (req, res) => {
   res.send(
     T.formPage({
       sections: FORM_SECTIONS,
@@ -166,7 +258,7 @@ app.get('/form', requireAuth, (req, res) => {
   );
 });
 
-app.post('/form', requireAuth, (req, res) => {
+app.post('/form', requireForm('application'), (req, res) => {
   uploadFormFiles(req, res, (err) => {
     if (err) {
       const message =
@@ -229,40 +321,139 @@ app.post('/form', requireAuth, (req, res) => {
   });
 });
 
+// ---------- invoice list form ----------
+function asArray(v) {
+  if (v === undefined || v === null) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+function parseAmount(v) {
+  const cleaned = String(v || '').replace(/[$,\s]/g, '');
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+
+function renderInvoiceForm(res, { rows = [], notes = '', error = null, user }) {
+  res.send(
+    T.invoiceFormPage({
+      groups: INVOICE_GROUPS,
+      columns: INVOICE_COLUMNS,
+      rows,
+      notes,
+      error,
+      maxRows: INVOICE_MAX_ROWS,
+      startRows: INVOICE_START_ROWS,
+      currentUser: user,
+    })
+  );
+}
+
+app.get('/invoices', requireForm('invoices'), (req, res) => {
+  renderInvoiceForm(res, { user: req.session.user });
+});
+
+app.post('/invoices', requireForm('invoices'), (req, res) => {
+  const body = req.body || {};
+  const cols = INVOICE_COLUMNS.map((c) => asArray(body[c.name]));
+  const rowCount = Math.max(0, ...cols.map((a) => a.length));
+
+  // Rebuild rows, keeping only ones with something typed in them.
+  const rawRows = [];
+  for (let i = 0; i < rowCount; i++) {
+    const r = {};
+    INVOICE_COLUMNS.forEach((c, ci) => (r[c.name] = String(cols[ci][i] || '').trim()));
+    r.state = r.state.toUpperCase();
+    if (INVOICE_COLUMNS.some((c) => r[c.name] !== '')) rawRows.push(r);
+  }
+  const notes = String(body.notes || '').trim();
+
+  const errors = [];
+  if (!rawRows.length) errors.push('Enter at least one invoice.');
+  if (rawRows.length > INVOICE_MAX_ROWS) errors.push(`An invoice list can have at most ${INVOICE_MAX_ROWS} rows.`);
+  rawRows.forEach((r, i) => {
+    const missing = INVOICE_COLUMNS.filter((c) => c.required && !r[c.name]).map((c) => c.csv);
+    if (missing.length) errors.push(`Row ${i + 1}: missing ${missing.join(', ')}.`);
+    const amt = parseAmount(r.amount);
+    if (r.amount && Number.isNaN(amt)) errors.push(`Row ${i + 1}: amount "${r.amount}" is not a valid number.`);
+  });
+  if (errors.length) {
+    return renderInvoiceForm(res, { rows: rawRows, notes, error: errors.join(' '), user: req.session.user });
+  }
+
+  const rows = rawRows.map((r) => ({ ...r, amount: parseAmount(r.amount) }));
+  const total = Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+
+  db.prepare(
+    `INSERT INTO invoice_lists (user_id, submitted_by, notes, invoice_count, total_amount, rows)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(req.session.user.id, req.session.user.username, notes, rows.length, total, JSON.stringify(rows));
+
+  maybeSendInvoiceNotification({
+    submitted_by: req.session.user.username,
+    submitted_at: new Date().toISOString(),
+    rows,
+    total,
+    notes,
+  });
+
+  res.send(T.invoiceSuccessPage({ count: rows.length, total, currentUser: req.session.user }));
+});
+
 // ---------- admin: dashboard ----------
 app.get('/admin', requireAdmin, (req, res) => {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   const submissionCount = db.prepare('SELECT COUNT(*) AS c FROM submissions').get().c;
-  res.send(T.adminDashboardPage({ userCount, submissionCount, currentUser: req.session.user }));
+  const invoiceListCount = db.prepare('SELECT COUNT(*) AS c FROM invoice_lists').get().c;
+  res.send(T.adminDashboardPage({ userCount, submissionCount, invoiceListCount, currentUser: req.session.user }));
 });
 
 // ---------- admin: users ----------
 function listUsers() {
-  return db.prepare('SELECT id, username, role, display_name, created_at FROM users ORDER BY created_at DESC').all();
+  return db.prepare('SELECT id, username, role, display_name, form_access, created_at FROM users ORDER BY created_at DESC').all();
+}
+
+function cleanAccess(v) {
+  return FORM_ACCESS_OPTIONS.some((o) => o.value === v) ? v : 'all';
+}
+
+function renderUsers(res, req, extra = {}) {
+  res.send(
+    T.adminUsersPage({
+      users: listUsers(),
+      error: null,
+      generatedPassword: null,
+      newUsername: null,
+      notice: null,
+      accessOptions: FORM_ACCESS_OPTIONS,
+      currentUser: req.session.user,
+      ...extra,
+    })
+  );
 }
 
 app.get('/admin/users', requireAdmin, (req, res) => {
-  res.send(T.adminUsersPage({ users: listUsers(), error: null, generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+  renderUsers(res, req);
 });
 
 app.post('/admin/users', requireAdmin, (req, res) => {
-  const { username, display_name, role } = req.body;
+  const { username, display_name, role, form_access } = req.body;
   const uname = (username || '').trim();
   if (!uname) {
-    return res.send(T.adminUsersPage({ users: listUsers(), error: 'Username is required.', generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+    return renderUsers(res, req, { error: 'Username is required.' });
   }
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(uname);
   if (existing) {
-    return res.send(T.adminUsersPage({ users: listUsers(), error: 'That username is already taken.', generatedPassword: null, newUsername: null, currentUser: req.session.user }));
+    return renderUsers(res, req, { error: 'That username is already taken.' });
   }
 
   const tempPassword = Math.random().toString(36).slice(-6) + Math.random().toString(36).slice(-6);
   const hash = bcrypt.hashSync(tempPassword, 10);
   db.prepare(
-    'INSERT INTO users (username, password_hash, role, display_name, must_change_password) VALUES (?, ?, ?, ?, 1)'
-  ).run(uname, hash, role === 'admin' ? 'admin' : 'user', display_name || uname);
+    'INSERT INTO users (username, password_hash, role, display_name, must_change_password, form_access) VALUES (?, ?, ?, ?, 1, ?)'
+  ).run(uname, hash, role === 'admin' ? 'admin' : 'user', display_name || uname, cleanAccess(form_access));
 
-  res.send(T.adminUsersPage({ users: listUsers(), error: null, generatedPassword: tempPassword, newUsername: uname, currentUser: req.session.user }));
+  renderUsers(res, req, { generatedPassword: tempPassword, newUsername: uname });
 });
 
 app.post('/admin/users/:id/reset-password', requireAdmin, (req, res) => {
@@ -270,41 +461,26 @@ app.post('/admin/users/:id/reset-password', requireAdmin, (req, res) => {
   const hash = bcrypt.hashSync(tempPassword, 10);
   db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?').run(hash, req.params.id);
   const target = db.prepare('SELECT username FROM users WHERE id = ?').get(req.params.id);
-  res.send(
-    T.adminUsersPage({
-      users: listUsers(),
-      error: null,
-      generatedPassword: tempPassword,
-      newUsername: target ? target.username : null,
-      currentUser: req.session.user,
-    })
-  );
+  renderUsers(res, req, { generatedPassword: tempPassword, newUsername: target ? target.username : null });
+});
+
+app.post('/admin/users/:id/access', requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT username FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return renderUsers(res, req, { error: 'That user no longer exists.' });
+  const access = cleanAccess(req.body.form_access);
+  db.prepare('UPDATE users SET form_access = ? WHERE id = ?').run(access, req.params.id);
+  const label = FORM_ACCESS_OPTIONS.find((o) => o.value === access).label;
+  renderUsers(res, req, { notice: `${target.username} now has access to: ${label}.` });
 });
 
 app.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
   if (Number(req.params.id) === req.session.user.id) {
-    return res.send(
-      T.adminUsersPage({
-        users: listUsers(),
-        error: "You can't delete your own account while logged in.",
-        generatedPassword: null,
-        newUsername: null,
-        currentUser: req.session.user,
-      })
-    );
+    return renderUsers(res, req, { error: "You can't delete your own account while logged in." });
   }
   try {
     db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
   } catch (err) {
-    return res.send(
-      T.adminUsersPage({
-        users: listUsers(),
-        error: 'Could not delete that user: ' + err.message,
-        generatedPassword: null,
-        newUsername: null,
-        currentUser: req.session.user,
-      })
-    );
+    return renderUsers(res, req, { error: 'Could not delete that user: ' + err.message });
   }
   res.redirect('/admin/users');
 });
@@ -372,6 +548,61 @@ app.get('/admin/submissions/:id/download/:field', requireAdmin, (req, res) => {
   const filePath = path.join(UPLOAD_DIR, meta.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).send('File no longer exists on the server.');
   res.download(filePath, meta.originalName);
+});
+
+// ---------- admin: invoice lists ----------
+function invoiceCsv(lists) {
+  const header = ['list_id', 'submitted_by', 'submitted_at', 'row', ...INVOICE_COLUMNS.map((c) => c.csv)];
+  const records = [];
+  lists.forEach((l) => {
+    JSON.parse(l.rows).forEach((r, i) => {
+      records.push([l.id, l.submitted_by, l.submitted_at, i + 1, ...INVOICE_COLUMNS.map((c) => (r[c.name] ?? ''))]);
+    });
+  });
+  return stringify([header, ...records]);
+}
+
+app.get('/admin/invoices', requireAdmin, (req, res) => {
+  const q = (req.query.q || '').trim();
+  let lists;
+  if (q) {
+    const like = `%${q}%`;
+    lists = db
+      .prepare('SELECT * FROM invoice_lists WHERE submitted_by LIKE ? OR rows LIKE ? ORDER BY submitted_at DESC')
+      .all(like, like);
+  } else {
+    lists = db.prepare('SELECT * FROM invoice_lists ORDER BY submitted_at DESC').all();
+  }
+  res.send(T.adminInvoiceListsPage({ lists, q, currentUser: req.session.user }));
+});
+
+app.get('/admin/invoices/export.csv', requireAdmin, (req, res) => {
+  const lists = db.prepare('SELECT * FROM invoice_lists ORDER BY submitted_at DESC').all();
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="invoice-lists-${Date.now()}.csv"`);
+  res.send(invoiceCsv(lists));
+});
+
+app.get('/admin/invoices/:id/export.csv', requireAdmin, (req, res) => {
+  const list = db.prepare('SELECT * FROM invoice_lists WHERE id = ?').get(req.params.id);
+  if (!list) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="invoice-list-${list.id}.csv"`);
+  res.send(invoiceCsv([list]));
+});
+
+app.get('/admin/invoices/:id', requireAdmin, (req, res) => {
+  const list = db.prepare('SELECT * FROM invoice_lists WHERE id = ?').get(req.params.id);
+  if (!list) return res.status(404).send('Not found');
+  res.send(
+    T.adminInvoiceListDetailPage({
+      list,
+      rows: JSON.parse(list.rows),
+      groups: INVOICE_GROUPS,
+      columns: INVOICE_COLUMNS,
+      currentUser: req.session.user,
+    })
+  );
 });
 
 // ---------- admin: settings (email notifications) ----------

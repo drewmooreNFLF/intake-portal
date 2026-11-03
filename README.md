@@ -23,6 +23,24 @@ and optional email notifications on each submission.
   every new submission. Leave blank to skip email — submissions are always
   saved regardless.
 
+## Invoice List form
+
+A second form at `/invoices` (linked as "Invoice List" in the top bar) for
+submitting a batch of invoices — one row per invoice with insured last/first
+name, property address (street, city, state, zip), invoice number and amount.
+It starts with 10 rows, users can add/remove rows (up to 100), and it shows a
+running count and total. Admins see every list under Admin → View Invoice
+Lists, with per-list detail pages and CSV export (one CSV row per invoice).
+Columns are defined in `INVOICE_COLUMNS` in `fields.js`. If email settings
+are configured, each invoice list also triggers a notification email.
+
+### Form access per user
+
+Each user has a Form Access setting (Admin → Manage Users): Both forms,
+Funding Application only, or Invoice List only. Users only see links to, and
+can only open, the forms they're allowed; changes take effect on their next
+page load. Existing users default to Both forms. Admins always see everything.
+
 ## Running locally
 
 ```

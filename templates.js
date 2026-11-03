@@ -73,13 +73,36 @@ form.inline { display:inline; }
 .detail-grid dt { color:var(--muted); }
 .detail-grid dd { margin:0; }
 .small { font-size:12.5px; color:var(--muted); }
-@media (max-width:640px) { .field-grid{grid-template-columns:1fr;} .dash-grid{grid-template-columns:1fr;} .wrap{margin:20px auto;} }
+.dash-grid.three { grid-template-columns:1fr 1fr 1fr; }
+.inv-scroll { overflow-x:auto; margin:0 -4px; }
+table.inv { min-width:900px; }
+table.inv th, table.inv td { padding:5px 4px; border-bottom:1px solid #eef0f3; }
+table.inv tr:hover td { background:transparent; }
+table.inv th.group { text-align:center; color:var(--text); border-bottom:2px solid var(--primary); }
+table.inv td.rownum { width:32px; color:var(--muted); text-align:right; font-size:12.5px; }
+table.inv input { width:100%; padding:7px 8px; font-size:13.5px; }
+table.inv input.state { text-transform:uppercase; }
+table.inv input.amount { text-align:right; }
+table.inv button.rm { background:none; color:var(--muted); padding:4px 8px; font-size:17px; line-height:1; }
+table.inv button.rm:hover { color:var(--danger); background:none; }
+.inv-footer { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:16px; }
+.inv-totals { font-size:14px; } .inv-totals strong { font-size:16px; }
+td.num, th.num { text-align:right; }
+@media (max-width:640px) { .field-grid{grid-template-columns:1fr;} .dash-grid,.dash-grid.three{grid-template-columns:1fr;} .wrap{margin:20px auto;} }
 `;
+
+function canSee(user, form) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const access = user.form_access || 'all';
+  return access === 'all' || access === form;
+}
 
 function layout({ title = 'New Future Legal Funding', body = '', currentUser = null }) {
   const nav = currentUser
     ? `<span class="user-pill">${escapeHtml(currentUser.display_name || currentUser.username)} &middot; ${currentUser.role}</span>
-       <a href="/form">Form</a>
+       ${canSee(currentUser, 'application') ? '<a href="/form">Funding Application</a>' : ''}
+       ${canSee(currentUser, 'invoices') ? '<a href="/invoices">Invoice List</a>' : ''}
        ${currentUser.role === 'admin' ? '<a href="/admin">Admin</a>' : ''}
        <a href="/account/change-password">Change Password</a>
        <form class="inline" method="POST" action="/logout" style="display:inline">
@@ -244,7 +267,7 @@ function formPage({ sections, fileFields, values, error, currentUser }) {
   });
 }
 
-function adminDashboardPage({ userCount, submissionCount, currentUser }) {
+function adminDashboardPage({ userCount, submissionCount, invoiceListCount, currentUser }) {
   return layout({
     title: 'Admin · Dashboard',
     currentUser,
@@ -253,13 +276,15 @@ function adminDashboardPage({ userCount, submissionCount, currentUser }) {
       <div class="card">
         <h1>Admin Dashboard</h1>
         <p class="subtitle">Manage users, review submissions, and configure email notifications.</p>
-        <div class="dash-grid">
+        <div class="dash-grid three">
           <div class="card stat-card"><div class="num">${userCount}</div><div class="label">User Accounts</div></div>
-          <div class="card stat-card"><div class="num">${submissionCount}</div><div class="label">Form Submissions</div></div>
+          <div class="card stat-card"><div class="num">${submissionCount}</div><div class="label">Funding Applications</div></div>
+          <div class="card stat-card"><div class="num">${invoiceListCount}</div><div class="label">Invoice Lists</div></div>
         </div>
         <div class="actions-row">
           <a class="btn" href="/admin/users">Manage Users</a>
           <a class="btn secondary" href="/admin/submissions">View Submissions</a>
+          <a class="btn secondary" href="/admin/invoices">View Invoice Lists</a>
           <a class="btn secondary" href="/admin/settings">Email Settings</a>
         </div>
       </div>
@@ -267,7 +292,13 @@ function adminDashboardPage({ userCount, submissionCount, currentUser }) {
   });
 }
 
-function adminUsersPage({ users, error, generatedPassword, newUsername, currentUser }) {
+function accessSelect(options, selected, attrs = '') {
+  return `<select name="form_access" ${attrs}>${options
+    .map((o) => `<option value="${o.value}" ${o.value === (selected || 'all') ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)
+    .join('')}</select>`;
+}
+
+function adminUsersPage({ users, error, notice, generatedPassword, newUsername, accessOptions, currentUser }) {
   const rows = users
     .map(
       (u) => `
@@ -275,6 +306,14 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
         <td>${escapeHtml(u.username)}</td>
         <td>${escapeHtml(u.display_name || '')}</td>
         <td><span class="pill ${u.role}">${u.role}</span></td>
+        <td>${
+          u.role === 'admin'
+            ? '<span class="small">All forms (admin)</span>'
+            : `<form class="inline" method="POST" action="/admin/users/${u.id}/access" style="display:flex;gap:6px;align-items:center;">
+                 ${accessSelect(accessOptions, u.form_access, 'style="padding:5px 8px;font-size:12.5px;"')}
+                 <button type="submit" class="secondary" style="padding:5px 10px;font-size:12.5px;">Save</button>
+               </form>`
+        }</td>
         <td class="small">${escapeHtml(u.created_at)}</td>
         <td>
           <form class="inline" method="POST" action="/admin/users/${u.id}/reset-password" onsubmit="return confirm('Reset password for ${escapeHtml(u.username)}?');">
@@ -295,8 +334,9 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
     <div class="wrap wide">
       <div class="card">
         <h1>User Accounts</h1>
-        <p class="subtitle">Add a user, then share their temporary password with them securely. They'll be required to set their own password on first login.</p>
+        <p class="subtitle">Add a user, then share their temporary password with them securely. They'll be required to set their own password on first login. Form Access controls which form(s) each user can see; admins always see everything.</p>
         ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
+        ${notice ? `<div class="alert success">${escapeHtml(notice)}</div>` : ''}
         ${
           generatedPassword
             ? `<div class="credential-box">Temporary credentials for <strong>${escapeHtml(newUsername)}</strong>:<br/>
@@ -310,10 +350,11 @@ function adminUsersPage({ users, error, generatedPassword, newUsername, currentU
           <div class="field"><label>Role</label>
             <select name="role"><option value="user">User</option><option value="admin">Admin</option></select>
           </div>
+          <div class="field"><label>Form Access</label>${accessSelect(accessOptions, 'all')}</div>
           <div class="field"><button type="submit">Add User</button></div>
         </form>
         <table>
-          <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th></th></tr></thead>
+          <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Form Access</th><th>Created</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -427,6 +468,213 @@ function adminSettingsPage({ settings, saved, currentUser }) {
   });
 }
 
+// ---------- Invoice List ----------
+function formatMoney(n) {
+  const num = Number(n) || 0;
+  return num.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function invoiceRowHtml(columns, row, i) {
+  const cells = columns
+    .map((c) => {
+      const val = escapeHtml(row[c.name] || '');
+      const attrs = [
+        `name="${c.name}[]"`,
+        `value="${val}"`,
+        `aria-label="${escapeHtml(c.csv)} row ${i + 1}"`,
+        c.maxlength ? `maxlength="${c.maxlength}"` : '',
+        c.numeric ? 'inputmode="decimal" placeholder="0.00"' : '',
+        `class="${c.name === 'state' ? 'state' : c.numeric ? 'amount' : ''}"`,
+      ].join(' ');
+      return `<td${c.width ? ` style="width:${c.width}"` : ''}><input type="text" ${attrs} /></td>`;
+    })
+    .join('');
+  return `<tr><td class="rownum">${i + 1}</td>${cells}<td><button type="button" class="rm" title="Remove row">&times;</button></td></tr>`;
+}
+
+function invoiceFormPage({ groups, columns, rows, notes, error, maxRows, startRows, currentUser }) {
+  const filled = rows && rows.length ? rows : [];
+  const count = Math.max(filled.length, startRows);
+  const bodyRows = Array.from({ length: count }, (_, i) => invoiceRowHtml(columns, filled[i] || {}, i)).join('\n');
+  const blankRow = invoiceRowHtml(columns, {}, 0);
+  const groupHeader = groups
+    .map((g) => `<th class="group" colspan="${g.fields.length}">${escapeHtml(g.title)}</th>`)
+    .join('');
+  const colHeader = columns
+    .map((c) => `<th${c.numeric ? ' class="num"' : ''}>${escapeHtml(c.label)}${c.required ? ' <span class="req" style="color:var(--danger)">*</span>' : ''}</th>`)
+    .join('');
+
+  return layout({
+    title: 'Invoice List',
+    currentUser,
+    body: `
+    <div class="wrap wide">
+      <div class="card">
+        <h1>Invoice List</h1>
+        <p class="subtitle" style="margin-bottom:4px;">All information submitted is considered confidential and will not be shared.</p>
+        <p class="subtitle">Enter one invoice per row. Fields marked <span style="color:#d1435b">*</span> are required on every row you fill in; blank rows are ignored.</p>
+        ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
+        <form method="POST" action="/invoices" id="invoiceForm">
+          <div class="inv-scroll">
+            <table class="inv">
+              <thead>
+                <tr><th></th>${groupHeader}<th></th></tr>
+                <tr><th>#</th>${colHeader}<th></th></tr>
+              </thead>
+              <tbody id="invRows">${bodyRows}</tbody>
+            </table>
+          </div>
+          <div class="inv-footer">
+            <div>
+              <button type="button" class="secondary" id="addRow">+ Add Row</button>
+              <button type="button" class="secondary" id="addTen">+ Add 10 Rows</button>
+              <span class="small" style="margin-left:8px;">Up to ${maxRows} rows</span>
+            </div>
+            <div class="inv-totals">Invoices: <strong id="invCount">0</strong> &nbsp;&middot;&nbsp; Total: <strong id="invTotal">$0.00</strong></div>
+          </div>
+          <div class="section-title" style="margin-top:28px;">Notes</div>
+          <div class="field full">
+            <label for="notes">Anything we should know about this batch (optional)</label>
+            <textarea id="notes" name="notes">${escapeHtml(notes || '')}</textarea>
+          </div>
+          <div class="actions-row">
+            <button type="submit">Submit Invoice List</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <template id="rowTpl">${blankRow}</template>
+    <script>
+    (function () {
+      var MAX = ${Number(maxRows)};
+      var tbody = document.getElementById('invRows');
+      var tpl = document.getElementById('rowTpl');
+      function amt(v) { var n = parseFloat(String(v).replace(/[$,\\s]/g, '')); return isNaN(n) ? 0 : n; }
+      function renumber() {
+        Array.prototype.forEach.call(tbody.rows, function (r, i) { r.cells[0].textContent = i + 1; });
+        recalc();
+      }
+      function recalc() {
+        var count = 0, total = 0;
+        Array.prototype.forEach.call(tbody.rows, function (r) {
+          var any = false;
+          r.querySelectorAll('input').forEach(function (inp) { if (inp.value.trim()) any = true; });
+          if (any) { count++; total += amt(r.querySelector('input.amount').value); }
+        });
+        document.getElementById('invCount').textContent = count;
+        document.getElementById('invTotal').textContent = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+      }
+      function addRow() {
+        if (tbody.rows.length >= MAX) return;
+        tbody.appendChild(tpl.content.firstElementChild.cloneNode(true));
+        renumber();
+      }
+      tbody.addEventListener('click', function (e) {
+        if (!e.target.classList.contains('rm')) return;
+        e.target.closest('tr').remove();
+        if (!tbody.rows.length) addRow();
+        renumber();
+      });
+      tbody.addEventListener('input', recalc);
+      tbody.addEventListener('focusout', function (e) {
+        if (e.target.classList.contains('amount') && e.target.value.trim()) {
+          e.target.value = amt(e.target.value).toFixed(2); recalc();
+        }
+      });
+      document.getElementById('addRow').onclick = addRow;
+      document.getElementById('addTen').onclick = function () { for (var i = 0; i < 10; i++) addRow(); };
+      recalc();
+    })();
+    </script>`,
+  });
+}
+
+function invoiceSuccessPage({ count, total, currentUser }) {
+  return layout({
+    title: 'Invoice List Submitted',
+    currentUser,
+    body: `
+    <div class="wrap">
+      <div class="card">
+        <div class="alert success">Thank you — your invoice list (${count} invoice${count === 1 ? '' : 's'}, ${escapeHtml(formatMoney(total))}) has been submitted successfully.</div>
+        <a class="btn" href="/invoices">Submit Another Invoice List</a>
+      </div>
+    </div>`,
+  });
+}
+
+function adminInvoiceListsPage({ lists, q, currentUser }) {
+  const trs = lists
+    .map(
+      (r) => `
+      <tr>
+        <td>#${r.id}</td>
+        <td>${escapeHtml(r.submitted_by)}</td>
+        <td class="num">${r.invoice_count}</td>
+        <td class="num">${escapeHtml(formatMoney(r.total_amount))}</td>
+        <td class="small">${escapeHtml(r.submitted_at)}</td>
+        <td><a class="btn secondary" style="padding:5px 10px;font-size:12.5px;" href="/admin/invoices/${r.id}">View</a></td>
+      </tr>`
+    )
+    .join('\n');
+  return layout({
+    title: 'Admin · Invoice Lists',
+    currentUser,
+    body: `
+    <div class="wrap wide">
+      <div class="card">
+        <h1>Invoice Lists</h1>
+        <p class="subtitle">Every invoice list submitted through the portal.</p>
+        <form method="GET" action="/admin/invoices" class="search-row">
+          <input type="text" name="q" placeholder="Search by submitted-by user, insured name, or invoice number" value="${escapeHtml(q)}" />
+          <button type="submit" class="secondary">Search</button>
+          <a class="btn" href="/admin/invoices/export.csv">Export All to CSV</a>
+        </form>
+        <table>
+          <thead><tr><th>List</th><th>Submitted By</th><th class="num">Invoices</th><th class="num">Total</th><th>Submitted At</th><th></th></tr></thead>
+          <tbody>${trs || '<tr><td colspan="6" class="small">No invoice lists yet.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`,
+  });
+}
+
+function adminInvoiceListDetailPage({ list, rows, groups, columns, currentUser }) {
+  const groupHeader = groups.map((g) => `<th class="group" colspan="${g.fields.length}">${escapeHtml(g.title)}</th>`).join('');
+  const colHeader = columns.map((c) => `<th${c.numeric ? ' class="num"' : ''}>${escapeHtml(c.label)}</th>`).join('');
+  const trs = rows
+    .map(
+      (r, i) =>
+        `<tr><td class="rownum">${i + 1}</td>${columns
+          .map((c) => (c.numeric ? `<td class="num">${escapeHtml(formatMoney(r[c.name]))}</td>` : `<td>${escapeHtml(r[c.name]) || '&mdash;'}</td>`))
+          .join('')}</tr>`
+    )
+    .join('\n');
+  return layout({
+    title: 'Invoice List #' + list.id,
+    currentUser,
+    body: `
+    <div class="wrap wide">
+      <div class="card">
+        <h1>Invoice List #${list.id}</h1>
+        <p class="subtitle">Submitted by ${escapeHtml(list.submitted_by)} on ${escapeHtml(list.submitted_at)} &middot; ${list.invoice_count} invoice${list.invoice_count === 1 ? '' : 's'} &middot; ${escapeHtml(formatMoney(list.total_amount))}</p>
+        <div class="inv-scroll">
+          <table class="inv">
+            <thead><tr><th></th>${groupHeader}</tr><tr><th>#</th>${colHeader}</tr></thead>
+            <tbody>${trs}</tbody>
+            <tfoot><tr><td></td><td colspan="${columns.length - 1}" style="text-align:right;font-weight:600;">Total</td><td class="num" style="font-weight:600;">${escapeHtml(formatMoney(list.total_amount))}</td></tr></tfoot>
+          </table>
+        </div>
+        ${list.notes ? `<div class="section-title" style="margin-top:24px;">Notes</div><p style="white-space:pre-wrap;font-size:14px;">${escapeHtml(list.notes)}</p>` : ''}
+        <div class="actions-row">
+          <a class="btn secondary" href="/admin/invoices">Back to Invoice Lists</a>
+          <a class="btn secondary" href="/admin/invoices/${list.id}/export.csv">Download This List as CSV</a>
+        </div>
+      </div>
+    </div>`,
+  });
+}
+
 module.exports = {
   escapeHtml,
   loginPage,
@@ -438,4 +686,8 @@ module.exports = {
   adminSubmissionsPage,
   adminSubmissionDetailPage,
   adminSettingsPage,
+  invoiceFormPage,
+  invoiceSuccessPage,
+  adminInvoiceListsPage,
+  adminInvoiceListDetailPage,
 };
