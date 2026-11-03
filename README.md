@@ -23,6 +23,17 @@ and optional email notifications on each submission.
   every new submission. Leave blank to skip email — submissions are always
   saved regardless.
 
+## Invoice List form
+
+A second form at `/invoices` (linked as "Invoice List" in the top bar) for
+submitting a batch of invoices — one row per invoice with insured last/first
+name, property address (street, city, state, zip), invoice number and amount.
+It starts with 10 rows, users can add/remove rows (up to 100), and it shows a
+running count and total. Admins see every list under Admin → View Invoice
+Lists, with per-list detail pages and CSV export (one CSV row per invoice).
+Columns are defined in `INVOICE_COLUMNS` in `fields.js`. If email settings
+are configured, each invoice list also triggers a notification email.
+
 ## Running locally
 
 ```

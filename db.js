@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS submissions (
   submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS invoice_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  submitted_by TEXT NOT NULL,
+  notes TEXT,
+  invoice_count INTEGER NOT NULL DEFAULT 0,
+  total_amount REAL NOT NULL DEFAULT 0,
+  rows TEXT NOT NULL,
+  submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
